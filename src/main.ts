@@ -1,0 +1,98 @@
+import './style.css';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import reliefUrl from '../assets/earth-relief.jpg?inline';
+import provinces from '../assets/provinces.json';
+import rivers from '../assets/rivers.json';
+import lakes from '../assets/lakes.json';
+import cityAreas from '../assets/cities.json';
+import { spherePosition, cities, landforms } from './geo';
+import { sunPosition, solarTerms, type SolarTerm } from './astronomy';
+import { parseBeijing, beijingParts, formatBeijing, startOfBeijingDay, dayProgress, atDayProgress, playbackTime } from './time';
+
+const $ = <T extends HTMLElement>(id:string) => document.getElementById(id) as T;
+$('app').innerHTML = `
+<header><div class="brand"><span class="brandmark" aria-hidden="true">◉</span><div><h1>The Time World Map</h1><p>循时而行 · 观照山河</p></div></div><div class="header-right"><span class="offline-label"><i class="status-dot"></i>完全离线 · UTC+8</span><button id="terms-toggle" aria-expanded="false">二十四节气</button><button id="about" aria-label="项目说明">ⓘ</button></div></header>
+<main id="viewport" aria-label="交互式三维地球，拖动旋转，滚轮缩放"><div id="labels" class="label-layer"></div></main>
+<aside class="panel layers mobile-collapsed"><div class="panel-title"><button id="layers-toggle" aria-label="展开或收起地图图层">地图图层 ▾</button><span class="eyebrow">LAYERS</span></div><label class="toggle">省级行政边界<input id="province-toggle" type="checkbox" checked></label><label class="toggle">重点城市行政边界<input id="city-toggle" type="checkbox" checked></label><label class="toggle">河流与湖泊<input id="water-toggle" type="checkbox" checked></label><label class="toggle">地名标注<input id="labels-toggle" type="checkbox" checked></label><label class="toggle">自然地理名称<input id="landform-toggle" type="checkbox"></label><div class="rule"></div><div class="legend"><span class="line"></span>省界</div><div class="legend"><span class="line orange"></span>城市行政边界</div><div class="legend"><span class="line blue"></span>河流与湖泊</div><div class="terrain-block"><div class="small">真实地形 · 晕渲底图</div><div class="terrain-scale"></div><div class="scale-labels"><span>低地</span><span>山地</span><span>高原 / 冰雪</span></div></div><div class="rule"></div><label class="toggle">夜幕浓度<input id="night" class="night-control" type="range" min="20" max="70" value="40" aria-label="夜幕不透明度"></label><select id="boundary-mode" aria-label="昼夜边界定义" style="width:100%;font-size:10px"><option value="geometric">几何晨昏线 · 太阳中心 0°</option><option value="apparent">标准视日出日落 · −0.833°</option></select><p class="city-note" id="data-note">地理数据用于探索与学习，不作为法定边界依据。数据来源与限制见项目说明。</p></aside>
+<section class="location-card"><span class="eyebrow">THE EARTH, IN TIME</span><h2 id="season-title">此刻的地球</h2><p id="season-subtitle">从晨光到暮色<br>在一颗星球上，看见时间</p><span id="mode-tag" class="mode-tag">实时 · LIVE</span></section>
+<div class="map-actions"><button id="zoom-in" aria-label="放大">＋</button><button id="zoom-out" aria-label="缩小">−</button><button id="reset" aria-label="复位至中国">⌂</button></div><div class="hint">拖动旋转 · 滚轮缩放 · 探索昼夜交界</div><div class="copyright">Natural Earth / geoBoundaries / © OpenStreetMap contributors<br>研究与教学用途 · 非审定标准地图</div>
+<section class="panel timeline" aria-label="北京时间控制面板"><div class="timeline-top"><div class="time-readout"><strong id="clock">--:--:--</strong><span id="day-label"></span></div><div class="controls"><button id="live" class="active">此刻</button><input id="date" type="date" min="1900-01-01" max="2100-12-31" aria-label="北京时间日期"><input id="time" type="time" step="1" aria-label="北京时间时刻"><button id="restart" aria-label="从零点重新播放">↺</button><button id="play" class="primary" aria-label="播放全天">▶ 播放全天</button><select id="speed" aria-label="全天播放时长"><option value="30">30 秒 / 天</option><option value="60" selected>60 秒 / 天</option><option value="120">120 秒 / 天</option></select></div></div><input id="timeline" class="time-slider" type="range" min="0" max="86340" step="1" value="0" aria-label="全天时间进度"><div class="ticks"><span>00:00</span><span>04:00</span><span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>23:59</span></div><div class="timeline-bottom"><span id="sun-info" class="sun-info"></span><span id="boundary-info">几何晨昏线 · UTC+8 北京时间</span></div></section>
+<section id="terms" class="panel terms" aria-label="二十四节气"><div class="panel-title"><h2>沿着太阳的轨迹</h2><button id="terms-close" aria-label="关闭节气面板">×</button></div><div class="small">太阳视黄经每前进 15°，抵达一个节气。</div><label class="toggle">公历年份<input id="term-year" type="number" min="1900" max="2100" style="width:90px" aria-label="节气年份"></label><div id="term-grid" class="term-grid"></div><div id="term-detail" class="term-detail">选择节气，回到季节转折的精确时刻。</div><div class="term-actions"><button id="term-moment" disabled>定位节气时刻</button><button id="term-play" disabled>播放节气当天</button></div></section>
+<dialog id="about-dialog" class="info-dialog"><h2>在时间里，重新看见地球。</h2><p>The Time World Map 是可完全离线运行的三维地球。太阳位置与二十四节气由 Astronomy Engine 在本机计算，不需要联网、账号或服务器。</p><p>所有显示时间为 UTC+8。支持 1900–2100 年；节气按太阳视黄经的 15° 整数倍求解。默认几何晨昏线使用太阳中心高度 0°；标准视日出日落模式采用 −0.833°，近似考虑折射与太阳视半径，不考虑天气和山体遮挡。</p><p>地形底图与河湖来自 Natural Earth；行政边界的具体来源、年代、许可及缺失项见 docs/DATA_SOURCES.md。© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>（城市数据库 ODbL 1.0）。边界数据是开放研究数据，不是中国审定标准地图，不保证争议地区表达及行政区划时效性。请勿用于测绘、法律或行政界定。</p><p>拖动地球旋转，滚轮或双指缩放。点击“此刻”恢复实时；播放自动停在所选北京时间日期的 23:59。发布 HTML 已内嵌全部资源，可直接双击打开。</p><button id="about-close" class="primary">继续探索</button></dialog><div id="loading" class="loading">正在铺展山河…</div>`;
+
+let renderer:THREE.WebGLRenderer;
+try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});}catch(error){$('loading').innerHTML='当前浏览器未能创建 WebGL。请启用硬件加速并使用支持 WebGL 2 的浏览器。';throw error;}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));renderer.outputColorSpace=THREE.SRGBColorSpace;
+$('viewport').prepend(renderer.domElement);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(38,window.innerWidth/window.innerHeight,.01,100);
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=1.24;controls.maxDistance=5.5;controls.enablePan=false;controls.rotateSpeed=.55;controls.zoomSpeed=.7;
+let resetAnimation:{from:THREE.Vector3,start:number}|null=null;
+function resetView(animate=true){if(animate)resetAnimation={from:camera.position.clone(),start:performance.now()};else camera.position.copy(spherePosition(34,103,4.3));controls.update();}
+resetView(false);controls.addEventListener('start',()=>{resetAnimation=null;});
+const uniforms={earth:{value:new THREE.Texture()},sunDirection:{value:new THREE.Vector3(1,0,0)},nightOpacity:{value:.4},threshold:{value:0}};
+const earthMaterial=new THREE.ShaderMaterial({uniforms,vertexShader:`varying vec2 vUv; varying vec3 vWorldNormal; void main(){vUv=uv;vWorldNormal=normalize(mat3(modelMatrix)*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,fragmentShader:`uniform sampler2D earth;uniform vec3 sunDirection;uniform float nightOpacity;uniform float threshold;varying vec2 vUv;varying vec3 vWorldNormal;void main(){vec3 n=normalize(vWorldNormal);float solar=dot(n,sunDirection);float day=smoothstep(threshold-0.014,threshold+0.014,solar);vec3 color=texture2D(earth,vUv).rgb;float night=pow(1.0-nightOpacity,2.2);float brightness=mix(night,1.0,day);color*=brightness;gl_FragColor=vec4(color,1.0);#include <tonemapping_fragment>\n#include <colorspace_fragment>}`.replace(';#include',';\n#include')});
+const earth=new THREE.Mesh(new THREE.SphereGeometry(1,128,64),earthMaterial);scene.add(earth);
+new THREE.TextureLoader().load(reliefUrl,texture=>{texture.colorSpace=THREE.SRGBColorSpace;texture.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());uniforms.earth.value=texture;$('loading').classList.add('hidden');},undefined,()=>{$('loading').textContent='地形资源加载失败，请重新下载完整发布文件。';});
+const atmosphere=new THREE.Mesh(new THREE.SphereGeometry(1.012,64,32),new THREE.ShaderMaterial({transparent:true,depthWrite:false,side:THREE.BackSide,vertexShader:`varying vec3 vNormal;varying vec3 vPosition;void main(){vec4 p=modelViewMatrix*vec4(position,1.);vPosition=p.xyz;vNormal=normalize(normalMatrix*normal);gl_Position=projectionMatrix*p;}`,fragmentShader:`varying vec3 vNormal;varying vec3 vPosition;void main(){float rim=pow(1.-abs(dot(normalize(vNormal),normalize(-vPosition))),4.);gl_FragColor=vec4(.26,.48,.55,rim*.30);}`}));scene.add(atmosphere);
+
+interface GeoFeature {type:string;properties?:Record<string,unknown>;geometry:{type:string;coordinates:any};}
+interface GeoCollection {features:GeoFeature[];}
+function lineLayer(data:GeoCollection,color:number,radius:number,opacity=1):THREE.Group{
+ const group=new THREE.Group();const vertices:number[]=[];
+ const add=(line:number[][])=>{for(let i=1;i<line.length;i++){const a=line[i-1],b=line[i];if(!a||!b)continue;const va=spherePosition(a[1],a[0],radius),vb=spherePosition(b[1],b[0],radius); // interpolate long segments along the sphere, never through the globe
+ const steps=Math.max(1,Math.ceil(va.angleTo(vb)*180/Math.PI));let prev=va;for(let s=1;s<=steps;s++){const next=va.clone().lerp(vb,s/steps).normalize().multiplyScalar(radius);vertices.push(...prev.toArray(),...next.toArray());prev=next;}}};
+ for(const f of data.features){const g=f.geometry;if(!g)continue;if(g.type==='Polygon')g.coordinates.forEach(add);else if(g.type==='MultiPolygon')g.coordinates.forEach((p:number[][][])=>p.forEach(add));else if(g.type==='LineString')add(g.coordinates);else if(g.type==='MultiLineString')g.coordinates.forEach(add);}
+ const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));const material=new THREE.LineBasicMaterial({color,transparent:true,opacity,depthWrite:false});group.add(new THREE.LineSegments(geometry,material));scene.add(group);return group;
+}
+const provinceLayer=lineLayer(provinces as GeoCollection,0xf0e7b5,1.0018,.58);
+const cityLayer=lineLayer(cityAreas as GeoCollection,0xffc18c,1.0025,.9);
+const riverLayer=lineLayer(rivers as GeoCollection,0x6dc1de,1.0022,.8);
+const lakeLayer=lineLayer(lakes as GeoCollection,0x85d5ea,1.0023,.85);
+if(!(cityAreas as GeoCollection).features.length){const checkbox=$<HTMLInputElement>('city-toggle');checkbox.checked=false;checkbox.disabled=true;$('data-note').textContent='城市行政界尚无可核实的可分发数据，未用坐标点代替。省界为开放研究数据，非审定标准地图。';}
+
+interface Label {element:HTMLDivElement;position:THREE.Vector3;kind:'province'|'city'|'landform';priority:number;}
+const labels:Label[]=[];
+function label(text:string,lat:number,lon:number,kind:Label['kind'],priority=0){const el=document.createElement('div');el.className=`map-label ${kind}`;el.textContent=text;$('labels').append(el);labels.push({element:el,position:spherePosition(lat,lon,1.008),kind,priority});}
+const provinceLocations=[['新疆',41,85],['西藏',31.5,88],['青海',35,96],['甘肃',38,101],['内蒙古',43,113],['黑龙江',47,128],['吉林',43.5,126],['辽宁',41,123],['河北',38.5,115],['山西',37.5,112],['陕西',35.8,109],['宁夏',37.1,106],['山东',36.4,118.3],['河南',33.7,113.5],['江苏',33.4,119],['安徽',31.8,117],['湖北',31,112],['湖南',27.5,111.5],['江西',27,115.5],['浙江',28.9,120],['福建',26,118],['广东',23.7,113],['广西',23.5,108],['贵州',26.8,106.5],['云南',24.4,101],['四川',30.4,102],['海南',19.2,109.6],['台湾',23.7,121],['北京',40.3,116.5],['天津',39.2,117.4],['上海',31.2,121.5],['重庆',30,107.7],['香港',22.3,114.2],['澳门',22.2,113.5]] as const;
+provinceLocations.forEach(([n,lat,lon])=>label(n,lat,lon,'province'));
+cities.forEach(([n,lat,lon])=>label(n,lat,lon,'city',1));landforms.forEach(([n,lat,lon])=>label(n,lat,lon,'landform',2));
+let width=innerWidth,height=innerHeight;
+function resize(){width=innerWidth;height=innerHeight;camera.aspect=width/height;camera.fov=width<760?60:38;camera.updateProjectionMatrix();renderer.setSize(width,height); // move optical center above controls without tilting the globe
+ camera.setViewOffset(width,height,0,Math.round(height*.075),width,height);
+}
+addEventListener('resize',resize);resize();
+function updateLabels(){const occupied:{x:number,y:number}[]=[];const master=$<HTMLInputElement>('labels-toggle').checked;const dist=camera.position.length();for(const l of [...labels].sort((a,b)=>b.priority-a.priority)){const facing=l.position.dot(camera.position.clone().sub(l.position))>0.10;const kindEnabled=l.kind==='province'?$<HTMLInputElement>('province-toggle').checked:l.kind==='city'?dist<2.65:$<HTMLInputElement>('landform-toggle').checked;const p=l.position.clone().project(camera);const x=(p.x*.5+.5)*width,y=(-p.y*.5+.5)*height;const visible=master&&facing&&kindEnabled&&p.z<1&&x>8&&x<width-8&&y>75&&y<height-205&&!occupied.some(o=>Math.abs(o.x-x)<42&&Math.abs(o.y-y)<17);l.element.style.display=visible?'block':'none';if(visible){l.element.style.left=`${x}px`;l.element.style.top=`${y}px`;occupied.push({x,y});}}}
+
+let current=new Date(),mode:'live'|'manual'|'play'='live',selectedTerm:SolarTerm|null=null,selectedDay=startOfBeijingDay(current),playStart=0,playOffset=0,lastSunUpdate=0,lastUiUpdate=0;
+function setMode(next:typeof mode){mode=next;$('live').classList.toggle('active',mode==='live');$('play').textContent=mode==='play'?'Ⅱ 暂停':'▶ 播放全天';$('play').setAttribute('aria-label',mode==='play'?'暂停播放':'播放全天');$('mode-tag').textContent=mode==='live'?'实时 · LIVE':mode==='play'?'推演 · PLAYING':'探索 · CUSTOM';}
+function updateSun(){const sun=sunPosition(current);uniforms.sunDirection.value.set(...sun.direction);$('sun-info').textContent=`太阳直射点 ${Math.abs(sun.latitude).toFixed(2)}°${sun.latitude>=0?'N':'S'} · ${Math.abs(sun.longitude).toFixed(2)}°${sun.longitude>=0?'E':'W'}`;}
+function renderTime(forceInputs=false){const p=beijingParts(current);$('clock').textContent=p.time+(p.time.length===5?':'+String(p.seconds).padStart(2,'0'):'');$('day-label').textContent=p.date+' · UTC+8';if(document.activeElement!==$('date')||forceInputs)$<HTMLInputElement>('date').value=p.date;if(document.activeElement!==$('time')||forceInputs)$<HTMLInputElement>('time').value=p.time+(p.time.length===5?':'+String(p.seconds).padStart(2,'0'):'');$<HTMLInputElement>('timeline').value=String(Math.round(dayProgress(current)*86340));}
+function chooseDate(date:Date){if(!Number.isFinite(date.getTime()))return;current=date;selectedDay=startOfBeijingDay(date);setMode('manual');renderTime(true);updateSun();}
+function applyInputs(){try{chooseDate(parseBeijing($<HTMLInputElement>('date').value,$<HTMLInputElement>('time').value||'00:00'));$('date').removeAttribute('aria-invalid');}catch{$('date').setAttribute('aria-invalid','true');}}
+$('date').addEventListener('change',applyInputs);$('time').addEventListener('change',applyInputs);
+$('live').onclick=()=>{current=new Date();selectedDay=startOfBeijingDay(current);selectedTerm=null;setMode('live');$('season-title').textContent='此刻的地球';$('season-subtitle').innerHTML='从晨光到暮色<br>在一颗星球上，看见时间';renderTime(true);updateSun();};
+function play(fromStart=false){if(mode==='play'&&!fromStart){setMode('manual');return;}selectedDay=startOfBeijingDay(current);playOffset=fromStart?0:dayProgress(current);if(playOffset>.9999)playOffset=0;playStart=performance.now();setMode('play');}
+$('play').onclick=()=>play();$('restart').onclick=()=>play(true);
+$('speed').onchange=()=>{if(mode==='play'){playOffset=dayProgress(current);playStart=performance.now();}};
+$('timeline').oninput=()=>{setMode('manual');current=atDayProgress(selectedDay,Number($<HTMLInputElement>('timeline').value)/86340);renderTime(true);updateSun();};
+$('night').oninput=()=>uniforms.nightOpacity.value=Number($<HTMLInputElement>('night').value)/100;
+$('boundary-mode').onchange=()=>{const apparent=$<HTMLSelectElement>('boundary-mode').value==='apparent';uniforms.threshold.value=apparent?Math.sin(-.833*Math.PI/180):0;$('boundary-info').textContent=(apparent?'标准视日出日落 −0.833°':'几何晨昏线')+' · UTC+8 北京时间';};
+$('layers-toggle').onclick=()=>{const panel=document.querySelector('.layers')!;panel.classList.toggle('mobile-collapsed');};
+$('province-toggle').onchange=()=>provinceLayer.visible=$<HTMLInputElement>('province-toggle').checked;
+$('city-toggle').onchange=()=>cityLayer.visible=$<HTMLInputElement>('city-toggle').checked;
+$('water-toggle').onchange=()=>{riverLayer.visible=lakeLayer.visible=$<HTMLInputElement>('water-toggle').checked;};
+$('zoom-in').onclick=()=>camera.position.multiplyScalar(Math.max(controls.minDistance/camera.position.length(),.8));$('zoom-out').onclick=()=>camera.position.multiplyScalar(Math.min(controls.maxDistance/camera.position.length(),1.25));$('reset').onclick=()=>resetView();
+$('about').onclick=()=>$<HTMLDialogElement>('about-dialog').showModal();$('about-close').onclick=()=>$<HTMLDialogElement>('about-dialog').close();
+function toggleTerms(open:boolean){$('terms').classList.toggle('open',open);$('terms-toggle').setAttribute('aria-expanded',String(open));}
+$('terms-toggle').onclick=()=>toggleTerms(!$('terms').classList.contains('open'));$('terms-close').onclick=()=>toggleTerms(false);
+function selectTerm(term:SolarTerm){selectedTerm=term;chooseDate(term.date);$('season-title').textContent=term.name;$('season-subtitle').textContent=term.description;$('term-detail').innerHTML=`<strong>${term.name}</strong> · 太阳视黄经 ${term.longitude}°<br>${formatBeijing(term.date,true)} UTC+8<br><span class="small">${term.description}</span>`;$<HTMLButtonElement>('term-moment').disabled=false;$<HTMLButtonElement>('term-play').disabled=false;document.querySelectorAll<HTMLButtonElement>('.term-grid button').forEach(b=>b.classList.toggle('active',b.textContent===term.name));}
+function loadTerms(){const year=Number($<HTMLInputElement>('term-year').value);if(!Number.isInteger(year)||year<1900||year>2100){$('term-year').setAttribute('aria-invalid','true');return;}$('term-year').removeAttribute('aria-invalid');$('term-grid').replaceChildren();for(const term of solarTerms(year)){const b=document.createElement('button');b.textContent=term.name;b.title=formatBeijing(term.date,true)+' UTC+8';if(term.major)b.classList.add('major');b.onclick=()=>selectTerm(term);$('term-grid').append(b);}}
+$<HTMLInputElement>('term-year').value=String(beijingParts(current).year);$('term-year').onchange=loadTerms;loadTerms();$('term-moment').onclick=()=>{if(selectedTerm)chooseDate(selectedTerm.date);};$('term-play').onclick=()=>{if(selectedTerm){chooseDate(selectedTerm.date);play(true);}};
+renderTime(true);updateSun();
+let frame=0;
+function animate(now:number){requestAnimationFrame(animate);if(mode==='live')current=new Date();else if(mode==='play'){const duration=Number($<HTMLSelectElement>('speed').value);const elapsed=now-playStart+playOffset*duration*1000;const state=playbackTime(selectedDay,elapsed,duration);current=state.date;if(state.finished)setMode('manual');}if(now-lastSunUpdate>80){updateSun();lastSunUpdate=now;}if(now-lastUiUpdate>100){renderTime();lastUiUpdate=now;}if(resetAnimation){const t=Math.min(1,(now-resetAnimation.start)/650),e=1-Math.pow(1-t,3);camera.position.copy(resetAnimation.from.clone().lerp(spherePosition(34,103,4.3),e));if(t===1)resetAnimation=null;}controls.update();if(frame++%2===0)updateLabels();renderer.render(scene,camera);}
+requestAnimationFrame(animate);
+// Read-only QA hooks; no network or persistence.
+Object.assign(window,{__TTWM__:{getState:()=>({mode,date:current.toISOString(),sun:sunPosition(current),renderer:renderer.info.render,cityFeatures:(cityAreas as GeoCollection).features.length,provinceFeatures:(provinces as GeoCollection).features.length}),setDate:(date:string,time:string)=>chooseDate(parseBeijing(date,time)),solarTerms,version:'1.0.0'}});

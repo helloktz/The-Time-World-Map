@@ -1,0 +1,74 @@
+{
+  "retrievedAt": "2026-10-28",
+  "outputs": {
+    "provinces.json": {
+      "bytes": 127655,
+      "sha256": "35d29364fad8f0a2cc46bc04e0060e3b475f6aa7b1f5be9912cce52c9d4fe810"
+    },
+    "rivers.json": {
+      "bytes": 1181578,
+      "sha256": "bb50e7176033128884829a1d434ec7d0619a25bdfd0c1c229a76af139c90bad7"
+    },
+    "lakes.json": {
+      "bytes": 372057,
+      "sha256": "a35770c270b76c496b72327e817aa54191a3a762a8a2c1bf04704d60ab9a9448"
+    },
+    "cities.json": {
+      "bytes": 2150478,
+      "sha256": "9d55bd46731cc85131fee8b0783902bba0a2939999e004187ed297e5b67b584e"
+    },
+    "earth-relief.jpg": {
+      "bytes": 3220363,
+      "sha256": "330182b784fcefd38c10d89599e18ec87235452585d3e5520a1d71b8d3d01991"
+    }
+  },
+  "sources": {
+    "raster": {
+      "url": "https://naturalearth.s3.amazonaws.com/10m_raster/HYP_LR_SR_W.zip",
+      "archiveVersionFile": "2.0.0",
+      "webPageAdvertisedVersion": "3.2.0",
+      "originalDimensions": [
+        16200,
+        8100
+      ],
+      "outputDimensions": [
+        8192,
+        4096
+      ]
+    },
+    "provinces": {
+      "url": "https://media.githubusercontent.com/media/wmgeolab/geoBoundaries/9469f09/releaseData/gbOpen/CHN/ADM1/geoBoundaries-CHN-ADM1.geojson",
+      "sha256": "3a00467a0db9b4136facb5f2f3d0edbfd96adb15651cfdf63991da9281030e85",
+      "year": 2019
+    },
+    "naturalEarthVectors": {
+      "tag": "v5.1.2",
+      "baseURL": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/"
+    },
+    "osm": {
+      "endpoint": "https://overpass-api.de/api/interpreter",
+      "timestamps": [
+        {
+          "timestamp_osm_base": "2026-10-28T02:32:50Z",
+          "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+        },
+        {
+          "timestamp_osm_base": "2026-10-28T02:33:53Z",
+          "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+        }
+      ],
+      "relations": [
+        "relation/2110264",
+        "relation/3076268",
+        "relation/3226004",
+        "relation/3464353",
+        "relation/912940",
+        "relation/913067",
+        "relation/913069",
+        "relation/2131524",
+        "relation/3221112",
+        "relation/3287346"
+      ]
+    }
+  }
+}

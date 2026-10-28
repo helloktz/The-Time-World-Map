@@ -1,0 +1,34 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),args:['--enable-unsafe-swiftshader','--use-angle=swiftshader','--disable-dev-shm-usage']});
+const context=await browser.newContext({viewport:{width:1440,height:1000},timezoneId:'America/Los_Angeles'});
+const page=await context.newPage();const errors=[],requests=[],checks=[];
+page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+await context.route(/^https?:/,route=>{requests.push(route.request().url());return route.abort();});
+await mkdir('artifacts',{recursive:true});
+try{
+ await page.goto('file://'+resolve('dist/index.html'));
+ await page.waitForFunction(()=>window.__TTWM__&&document.getElementById('loading').classList.contains('hidden'));
+ await page.waitForTimeout(1000);
+ assert.equal(await page.locator('canvas').count(),1);const state=await page.evaluate(()=>window.__TTWM__.getState());assert(state.renderer.calls>0);assert.equal(state.cityFeatures,10);assert.equal(state.provinceFeatures,34);checks.push('WebGL renders real 34 provinces and 10 city polygons under file:// with all HTTP(S) requests blocked');
+ await page.locator('#date').fill('2026-06-21');await page.locator('#date').press('Tab');await page.locator('#time').fill('12:00:00');await page.locator('#time').press('Tab');
+ await page.waitForTimeout(250);assert.equal((await page.evaluate(()=>window.__TTWM__.getState())).date,'2026-06-21T04:00:00.000Z');checks.push('Date/time UI uses UTC+8 regardless of Los Angeles browser timezone');
+ await page.screenshot({path:'artifacts/globe-desktop.png'});
+ const noon=await page.locator('canvas').screenshot();await page.locator('#time').fill('00:00:00');await page.locator('#time').press('Tab');await page.waitForTimeout(250);const midnight=await page.locator('canvas').screenshot();assert(!noon.equals(midnight));checks.push('Noon and midnight produce different rendered globe pixels');
+ await page.screenshot({path:'artifacts/globe-midnight.png'});
+ for(const id of ['province-toggle','city-toggle','water-toggle','labels-toggle','landform-toggle']){await page.locator('#'+id).click();await page.locator('#'+id).click();}checks.push('Geographic layer and label controls respond to repeated toggles');
+ await page.locator('#terms-toggle').click();assert.equal(await page.locator('.term-grid button').count(),24);await page.locator('#term-year').fill('2024');await page.locator('#term-year').press('Tab');await page.locator('.term-grid button').filter({hasText:'冬至'}).click();await page.waitForTimeout(200);assert.equal(await page.locator('#season-title').textContent(),'冬至');assert.equal(await page.locator('.term-grid button.active').evaluate(el=>getComputedStyle(el).color),'rgb(27, 42, 35)');assert((await page.locator('#date').inputValue()).startsWith('2024-12-21'));await page.screenshot({path:'artifacts/globe-solstice.png'});await page.locator('#terms-close').click();checks.push('24 terms recalculate for selected year and locate real winter-solstice instant');
+ await page.locator('#date').fill('2024-02-29');await page.locator('#date').press('Tab');await page.locator('#time').fill('00:00:00');await page.locator('#time').press('Tab');
+ await page.locator('#speed').selectOption('30');await page.locator('#restart').click();await page.waitForTimeout(500);assert.equal((await page.evaluate(()=>window.__TTWM__.getState())).mode,'play');await page.locator('#play').click();const paused=(await page.evaluate(()=>window.__TTWM__.getState())).date;await page.waitForTimeout(300);assert.equal((await page.evaluate(()=>window.__TTWM__.getState())).date,paused);await page.locator('#play').click();await page.waitForTimeout(31000);const end=await page.evaluate(()=>window.__TTWM__.getState());assert.equal(end.mode,'manual');assert.equal(end.date,'2024-02-29T15:59:00.000Z');checks.push('Leap-day playback pauses/resumes and stops at Beijing 23:59 without changing day');
+ await page.locator('#timeline').focus();await page.keyboard.press('Home');await page.waitForTimeout(150);assert.equal((await page.evaluate(()=>window.__TTWM__.getState())).date,'2024-02-28T16:00:00.000Z');await page.keyboard.press('End');await page.waitForTimeout(150);assert.equal((await page.evaluate(()=>window.__TTWM__.getState())).date,'2024-02-29T15:59:00.000Z');checks.push('Timeline keyboard endpoints correctly span the Beijing natural day');
+ await page.locator('#boundary-mode').selectOption('apparent');assert((await page.locator('#boundary-info').textContent()).includes('−0.833'));await page.locator('#boundary-mode').selectOption('geometric');
+ await page.locator('#zoom-in').click();await page.mouse.move(800,350);await page.mouse.down();await page.mouse.move(1000,400,{steps:12});await page.mouse.up();await page.locator('#reset').click();await page.waitForTimeout(750);checks.push('Zoom, rotate and reset controls execute without error');
+ await page.locator('#about').click();assert(await page.locator('#about-dialog').isVisible());await page.locator('#about-close').click();await page.locator('#about').click();await page.keyboard.press('Escape');assert(!(await page.locator('#about-dialog').isVisible()));checks.push('About dialog closes and reopens; Escape works');
+ await page.locator('#live').click();assert.equal((await page.evaluate(()=>window.__TTWM__.getState())).mode,'live');
+ await page.setViewportSize({width:390,height:844});await page.waitForTimeout(350);await page.screenshot({path:'artifacts/globe-mobile.png'});assert(await page.locator('#play').isVisible());await page.locator('#layers-toggle').click();assert(await page.locator('#province-toggle').isVisible());await page.locator('#layers-toggle').click();assert(!(await page.locator('#province-toggle').isVisible()));checks.push('Mobile layout retains playback and collapsible geographic controls');
+ assert.deepEqual(requests,[]);assert.deepEqual(errors,[]);checks.push('Zero external resource requests and zero JS/WebGL console errors');
+ console.log(JSON.stringify({passed:true,checks,errors,requests},null,2));
+ await writeFile('artifacts/e2e-results.json',JSON.stringify({passed:true,checks,errors,requests},null,2));
+}catch(error){await page.screenshot({path:'artifacts/failure.png'}).catch(()=>{});await writeFile('artifacts/e2e-results.json',JSON.stringify({passed:false,checks,errors,requests,error:String(error)},null,2));console.error(error);process.exitCode=1;}finally{await browser.close();}
